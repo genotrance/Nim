@@ -264,6 +264,12 @@ proc addrLoc(conf: ConfigRef; a: TLoc): Rope =
   if lfIndirect notin a.flags and mapType(conf, a.t) != ctArray:
     result = "(&" & result & ")"
 
+proc byRefLoc(p: BProc; a: TLoc): Rope =
+  result = a.r
+  if lfIndirect notin a.flags and mapType(p.config, a.t) != ctArray and not
+      p.module.compileToCpp:
+    result = "(&" & result & ")"
+
 proc rdCharLoc(a: TLoc): Rope =
   # read a location that may need a char-cast:
   result = rdLoc(a)
@@ -321,7 +327,7 @@ proc resetLoc(p: BProc, loc: var TLoc) =
   else:
     if optNilCheck in p.options:
       linefmt(p, cpsStmts, "#chckNil((void*)$1);$n", addrLoc(p.config, loc))
-    if loc.storage != OnStack:
+    if loc.storage != OnStack and containsGcRef:
       linefmt(p, cpsStmts, "#genericReset((void*)$1, $2);$n",
               addrLoc(p.config, loc), genTypeInfo(p.module, loc.t, loc.lode.info))
       # XXX: generated reset procs should not touch the m_type
@@ -1056,9 +1062,22 @@ proc genVarPrototype(m: BModule, n: PNode) =
       if sfVolatile in sym.flags: add(m.s[cfsVars], " volatile")
       addf(m.s[cfsVars], " $1;$n", [sym.loc.r])
 
+const
+  frameDefines = """
+$1  define nimfr_(proc, file) \
+    TFrame FR_; \
+    FR_.procname = proc; FR_.filename = file; FR_.line = 0; FR_.len = 0; #nimFrame(&FR_);
+
+$1  define nimfrs_(proc, file, slots, length) \
+    struct {TFrame* prev;NCSTRING procname;NI line;NCSTRING filename; NI len; VarSlot s[slots];} FR_; \
+    FR_.procname = proc; FR_.filename = file; FR_.line = 0; FR_.len = length; #nimFrame((TFrame*)&FR_);
+
+$1  define nimln_(n, file) \
+    FR_.line = n; FR_.filename = file;
+"""
+
 proc addIntTypes(result: var Rope; conf: ConfigRef) {.inline.} =
-  addf(result, "#define NIM_NEW_MANGLING_RULES\L" &
-               "#define NIM_INTBITS $1\L", [
+  addf(result, "#define NIM_INTBITS $1\L", [
     platform.CPU[conf.target.targetCPU].intSize.rope])
   if conf.cppCustomNamespace.len > 0:
     result.add("#define USE_NIM_NAMESPACE ")
@@ -1302,6 +1321,7 @@ proc genInitCode(m: BModule) =
   ## this function is called in cgenWriteModules after all modules are closed,
   ## it means raising dependency on the symbols is too late as it will not propogate
   ## into other modules, only simple rope manipulations are allowed
+  appcg(m, m.s[cfsForwardTypes], frameDefines, [rope("#")])
 
   var moduleInitRequired = false
   let initname = getInitName(m.module)
@@ -1313,9 +1333,9 @@ proc genInitCode(m: BModule) =
     appcg(m, m.s[cfsTypeInit1], "static #TNimType $1[$2];$n",
           [m.nimTypesName, rope(m.nimTypes)])
 
-  # Give this small function its own scope
-  addf(prc, "{$N", [])
-  block:
+  if m.preInitProc.s(cpsInit).len > 0 or m.preInitProc.s(cpsStmts).len > 0:
+    # Give this small function its own scope
+    addf(prc, "{$N", [])
     # Keep a bogus frame in case the code needs one
     add(prc, ~"\tTFrame FR_; FR_.len = 0;$N")
 
@@ -1336,8 +1356,11 @@ proc genInitCode(m: BModule) =
       add(prc, genSectionStart(cpsStmts, m.config))
       add(prc, m.preInitProc.s(cpsStmts))
       add(prc, genSectionEnd(cpsStmts, m.config))
-  addf(prc, "}$N", [])
+    addf(prc, "}$N", [])
 
+  # add new scope for following code, because old vcc compiler need variable
+  # be defined at the top of the block
+  addf(prc, "{$N", [])
   if m.initProc.gcFrameId > 0:
     moduleInitRequired = true
     add(prc, initGCFrame(m.initProc))
@@ -1374,6 +1397,7 @@ proc genInitCode(m: BModule) =
   if m.initProc.gcFrameId > 0:
     moduleInitRequired = true
     add(prc, deinitGCFrame(m.initProc))
+  addf(prc, "}$N", [])
 
   addf(prc, "}$N$N", [])
 

@@ -1316,7 +1316,7 @@ proc typeRelImpl(c: var TCandidate, f, aOrig: PType,
         if typeRel(c, f.sons[i], a.sons[i]) == isNone: return isNone
       result = typeRel(c, f.lastSon, a.lastSon, flags + {trNoCovariance})
       subtypeCheck()
-      if result <= isConvertible: result = isNone
+      if result <= isIntConv: result = isNone
       elif tfNotNil in f.flags and tfNotNil notin a.flags:
         result = isNilConversion
     elif a.kind == tyNil: result = f.allowsNil
@@ -2071,6 +2071,7 @@ proc paramTypesMatchAux(m: var TCandidate, f, a: PType,
     # constructor in a call:
     if result == nil and f.kind == tyVarargs:
       if f.n != nil:
+        # Forward to the varargs converter
         result = localConvMatch(c, m, f, a, arg)
       else:
         r = typeRel(m, base(f), a)
@@ -2083,10 +2084,10 @@ proc paramTypesMatchAux(m: var TCandidate, f, a: PType,
         # bug #4799, varargs accepting subtype relation object
         elif r == isSubtype:
           inc(m.subtypeMatches)
-          if f.kind == tyTypeDesc:
+          if base(f).kind == tyTypeDesc:
             result = arg
           else:
-            result = implicitConv(nkHiddenSubConv, f, arg, m, c)
+            result = implicitConv(nkHiddenSubConv, base(f), arg, m, c)
           m.baseTypeMatch = true
         else:
           result = userConvMatch(c, m, base(f), a, arg)
@@ -2504,6 +2505,11 @@ proc instTypeBoundOp*(c: PContext; dc: PSym; t: PType; info: TLineInfo;
     if f.kind in {tyRef, tyPtr}: f = f.lastSon
   else:
     if f.kind == tyVar: f = f.lastSon
+  #if c.config.selectedGC == gcDestructors and f.kind == tySequence:
+  # use the canonical type to access the =sink and =destroy etc.
+  #  f = c.graph.sysTypes[tySequence]
+  #echo "YUP_---------Formal ", typeToString(f, preferDesc), " real ", typeToString(t, preferDesc), " ", f.id, " ", t.id
+
   if typeRel(m, f, t) == isNone:
     localError(c.config, info, "cannot instantiate: '" & dc.name.s & "'")
   else:

@@ -130,9 +130,9 @@
 ##       { "name": "Susan", "age": herAge }
 ##     ]
 ##
-##    var j2 = %* {"name": "Isaac", "books": ["Robot Dreams"]}
-##    j2["details"] = %* {"age":35, "pi":3.1415}
-##    echo j2
+##   var j2 = %* {"name": "Isaac", "books": ["Robot Dreams"]}
+##   j2["details"] = %* {"age":35, "pi":3.1415}
+##   echo j2
 
 runnableExamples:
   ## Note: for JObject, key ordering is preserved, unlike in some languages,
@@ -625,7 +625,7 @@ proc escapeJsonUnquoted*(s: string; result: var string) =
     of '\r': result.add("\\r")
     of '"': result.add("\\\"")
     of '\0'..'\7': result.add("\\u000" & $ord(c))
-    of '\14'..'\31': result.add("\\u00" & $ord(c))
+    of '\14'..'\31': result.add("\\u00" & toHex(ord(c), 2))
     of '\\': result.add("\\\\")
     else: result.add(c)
 
@@ -708,6 +708,22 @@ proc toPretty(result: var string, node: JsonNode, indent = 2, ml = true,
 proc pretty*(node: JsonNode, indent = 2): string =
   ## Returns a JSON Representation of `node`, with indentation and
   ## on multiple lines.
+  ##
+  ## Similar to prettyprint in Python.
+  runnableExamples:
+    let j = %* {"name": "Isaac", "books": ["Robot Dreams"],
+                "details": {"age":35, "pi":3.1415}}
+    doAssert pretty(j) == """
+{
+  "name": "Isaac",
+  "books": [
+    "Robot Dreams"
+  ],
+  "details": {
+    "age": 35,
+    "pi": 3.1415
+  }
+}"""
   result = ""
   toPretty(result, node, indent)
 
@@ -1328,6 +1344,12 @@ proc createConstructor(typeSym, jsonNode: NimNode): NimNode =
 
       let obj = getType(typeSym[1])
       result = processType(newIdentNode(typeName), obj, jsonNode, true)
+    of "range":
+      let typeNode = typeSym
+      # Deduce the base type from one of the endpoints
+      let baseType = getType(typeNode[1])
+
+      result = createConstructor(baseType, jsonNode)
     of "seq":
       let seqT = typeSym[1]
       let forLoopI = genSym(nskForVar, "i")
@@ -1686,9 +1708,9 @@ when isMainModule:
     doAssert(parsed2{"repository", "description"}.str=="IRC Library for Haskell", "Couldn't fetch via multiply nested key using {}")
 
   doAssert escapeJsonUnquoted("\10Foo🎃barÄ") == "\\nFoo🎃barÄ"
-  doAssert escapeJsonUnquoted("\0\7\20") == "\\u0000\\u0007\\u0020" # for #7887
+  doAssert escapeJsonUnquoted("\0\7\20") == "\\u0000\\u0007\\u0014" # for #7887
   doAssert escapeJson("\10Foo🎃barÄ") == "\"\\nFoo🎃barÄ\""
-  doAssert escapeJson("\0\7\20") == "\"\\u0000\\u0007\\u0020\"" # for #7887
+  doAssert escapeJson("\0\7\20") == "\"\\u0000\\u0007\\u0014\"" # for #7887
 
   # Test with extra data
   when not defined(js):
@@ -1721,3 +1743,21 @@ when isMainModule:
       foo = js.to Foo
 
     doAssert(foo.b == "abc")
+
+  # Generate constructors for range[T] types
+  block:
+    type
+      Q1 = range[0..10]
+      Q2 = range[0'i8..10'i8]
+      Q3 = range[0'u16..10'u16]
+      X = object
+        m1: Q1
+        m2: Q2
+        m3: Q3
+
+    let
+      obj = X(m1: 1, m2: 2'i8, m3: 3'u16)
+      jsonObj = %obj
+      desObj = to(jsonObj, type(obj))
+
+    doAssert(desObj == obj)

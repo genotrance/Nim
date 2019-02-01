@@ -80,6 +80,9 @@ let kochExe* = when isMainModule: os.getAppFilename() # always correct when koch
 proc kochExec*(cmd: string) =
   exec kochExe.quoteShell & " " & cmd
 
+proc kochExecFold*(desc, cmd: string) =
+  execFold(desc, kochExe.quoteShell & " " & cmd)
+
 template withDir(dir, body) =
   let old = getCurrentDir()
   try:
@@ -160,7 +163,7 @@ proc bundleNimsuggest() =
   nimCompile("nimsuggest/nimsuggest.nim", options = "-d:release")
 
 proc buildVccTool() =
-  nimCompile("tools/vccexe/vccexe.nim")
+  nimCompileFold("Compile Vcc", "tools/vccexe/vccexe.nim")
 
 proc bundleWinTools() =
   # TODO: consider building under `bin` instead of `.`
@@ -205,10 +208,10 @@ proc buildTool(toolname, args: string) =
 
 proc buildTools() =
   bundleNimsuggest()
-  nimCompile("tools/nimgrep.nim", options = "-d:release")
+  nimCompileFold("Compile nimgrep", "tools/nimgrep.nim", options = "-d:release")
   when defined(windows): buildVccTool()
-  nimCompile("nimpretty/nimpretty.nim", options = "-d:release")
-  nimCompile("tools/nimfind.nim", options = "-d:release")
+  nimCompileFold("Compile nimpretty", "nimpretty/nimpretty.nim", options = "-d:release")
+  nimCompileFold("Compile nimfind", "tools/nimfind.nim", options = "-d:release")
 
 proc nsis(latest: bool; args: string) =
   bundleNimbleExe(latest)
@@ -453,11 +456,11 @@ proc runCI(cmd: string) =
   # note(@araq): Do not replace these commands with direct calls (eg boot())
   # as that would weaken our testing efforts.
   when defined(posix): # appveyor (on windows) didn't run this
-    kochExec "boot"
-  kochExec "boot -d:release"
+    kochExecFold("Boot", "boot")
+  kochExecFold("Boot in release mode", "boot -d:release")
 
   ## build nimble early on to enable remainder to depend on it if needed
-  kochExec "nimble"
+  kochExecFold("Build Nimble", "nimble")
 
   when false:
     for pkg in "zip opengl sdl1 jester@#head niminst".split:
@@ -466,23 +469,23 @@ proc runCI(cmd: string) =
   buildTools() # altenatively, kochExec "tools --toolsNoNimble"
 
   ## run tests
-  exec "nim e tests/test_nimscript.nims"
+  execFold("Test nimscript", "nim e tests/test_nimscript.nims")
   when defined(windows):
     # note: will be over-written below
-    exec "nim c -d:nimCoroutines --os:genode -d:posix --compileOnly testament/tester"
+    execFold("Compile tester", "nim c -d:nimCoroutines --os:genode -d:posix --compileOnly testament/tester")
 
   # main bottleneck here
-  exec "nim c -r -d:nimCoroutines testament/tester --pedantic all -d:nimCoroutines"
+  execFold("Run tester", "nim c -r -d:nimCoroutines testament/tester --pedantic all -d:nimCoroutines")
 
-  exec "nim c -r nimdoc/tester"
-  exec "nim c -r nimpretty/tester.nim"
+  execFold("Run nimdoc tests", "nim c -r nimdoc/tester")
+  execFold("Run nimpretty tests", "nim c -r nimpretty/tester.nim")
   when defined(posix):
-    exec "nim c -r nimsuggest/tester"
+    execFold("Run nimsuggest tests", "nim c -r nimsuggest/tester")
 
   ## remaining actions
   when defined(posix):
-    kochExec "docs --git.commit:devel"
-    kochExec "csource"
+    kochExecFold("Docs", "docs --git.commit:devel")
+    kochExecFold("C sources", "csource")
   elif defined(windows):
     when false:
       kochExec "csource"
