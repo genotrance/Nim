@@ -254,7 +254,7 @@ else: # bootstrapping substitute
   proc getImpl*(symbol: NimNode): NimNode =
     symbol.symbol.getImpl
 
-  proc strValOld(n: NimNode): string  {.magic: "NStrVal", noSideEffect.}
+  proc strValOld(n: NimNode): string {.magic: "NStrVal", noSideEffect.}
 
   proc `$`*(s: NimSym): string {.magic: "IdentToStr", noSideEffect.}
 
@@ -346,6 +346,13 @@ object
     doAssert(dumpTypeImpl(a) == t)
     doAssert(dumpTypeImpl(b) == t)
     doAssert(dumpTypeImpl(c) == t)
+
+when defined(nimHasSignatureHashInMacro):
+  proc signatureHash*(n: NimNode): string {.magic: "NSigHash", noSideEffect.}
+    ## Returns a stable identifier derived from the signature of a symbol.
+    ## The signature combines many factors such as the type of the symbol,
+    ## the owning module of the symbol and others. The same identifier is
+    ## used in the back-end to produce the mangled symbol name.
 
 proc getTypeImpl*(n: typedesc): NimNode {.magic: "NGetType", noSideEffect.}
   ## Version of ``getTypeImpl`` which takes a ``typedesc``.
@@ -696,6 +703,17 @@ when compiles(float128):
     result = newNimNode(nnkFloat128Lit)
     result.floatVal = f
 
+proc newLit*(arg: enum): NimNode {.compileTime.} =
+  result = newCall(
+    arg.type.getTypeInst[1],
+    newLit(int(arg))
+  )
+
+proc newLit*[N,T](arg: array[N,T]): NimNode {.compileTime.}
+proc newLit*[T](arg: seq[T]): NimNode {.compileTime.}
+proc newLit*[T](s: set[T]): NimNode {.compileTime.}
+proc newLit*(arg: tuple): NimNode {.compileTime.}
+
 proc newLit*(arg: object): NimNode {.compileTime.} =
   result = nnkObjConstr.newTree(arg.type.getTypeInst[1])
   for a, b in arg.fieldPairs:
@@ -717,11 +735,6 @@ proc newLit*[T](arg: seq[T]): NimNode {.compileTime.} =
       getTypeInst( bindSym"T" )
     ),
     bracket
-  )
-proc newLit*(arg: enum): NimNode {.compileTime.} =
-  result = newCall(
-    arg.type.getTypeInst[1],
-    newLit(int(arg))
   )
 
 proc newLit*[T](s: set[T]): NimNode {.compileTime.} =

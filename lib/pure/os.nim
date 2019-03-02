@@ -47,7 +47,7 @@
 include "system/inclrtl"
 
 import
-  strutils, pathnorm, system/indexerrors
+  strutils, pathnorm
 
 const weirdTarget = defined(nimscript) or defined(js)
 
@@ -1648,6 +1648,7 @@ proc moveFile*(source, dest: string) {.rtl, extern: "nos$1",
   ## Moves a file from `source` to `dest`.
   ##
   ## If this fails, `OSError` is raised.
+  ## If `dest` already exists, it will be overwritten.
   ##
   ## Can be used to `rename files`:idx:.
   ##

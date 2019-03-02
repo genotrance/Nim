@@ -192,11 +192,11 @@ proc zip(latest: bool; args: string) =
        ["tools/niminst/niminst".exe, VersionAsString])
 
 proc ensureCleanGit() =
-   let (outp, status) = osproc.execCmdEx("git diff")
-   if outp.len != 0:
-     quit "Not a clean git repository; 'git diff' not empty!"
-   if status != 0:
-     quit "Not a clean git repository; 'git diff' returned non-zero!"
+  let (outp, status) = osproc.execCmdEx("git diff")
+  if outp.len != 0:
+    quit "Not a clean git repository; 'git diff' not empty!"
+  if status != 0:
+    quit "Not a clean git repository; 'git diff' returned non-zero!"
 
 proc xz(latest: bool; args: string) =
   ensureCleanGit()
@@ -463,10 +463,15 @@ proc runCI(cmd: string) =
   # as that would weaken our testing efforts.
   when defined(posix): # appveyor (on windows) didn't run this
     kochExecFold("Boot", "boot")
+  # boot without -d:nimHasLibFFI to make sure this still works
   kochExecFold("Boot in release mode", "boot -d:release")
 
   ## build nimble early on to enable remainder to depend on it if needed
   kochExecFold("Build Nimble", "nimble")
+
+  when false:
+    execFold("nimble install -y libffi", "nimble install -y libffi")
+    kochExecFold("boot -d:release -d:nimHasLibFFI", "boot -d:release -d:nimHasLibFFI")
 
   if getEnv("NIM_TEST_PACKAGES", "false") == "true":
     execFold("Test selected Nimble packages", "nim c -r testament/tester cat nimble-extra")

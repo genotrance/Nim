@@ -88,6 +88,7 @@ type
     allowMetaTypes*: bool     # allow types such as seq[Number]
                               # i.e. the result contains unresolved generics
     skipTypedesc*: bool       # wether we should skip typeDescs
+    isReturnType*: bool
     owner*: PSym              # where this instantiation comes from
     recursionLimit: int
 
@@ -574,7 +575,7 @@ proc replaceTypeVarsTAux(cl: var TReplTypeVars, t: PType): PType =
           var r = replaceTypeVarsT(cl, result.sons[i])
           if result.kind == tyObject:
             # carefully coded to not skip the precious tyGenericInst:
-            let r2 = r.skipTypes({tyAlias, tySink})
+            let r2 = r.skipTypes({tyAlias, tySink, tyOwned})
             if r2.kind in {tyPtr, tyRef}:
               r = skipTypes(r2, {tyPtr, tyRef})
           result.sons[i] = r
@@ -593,6 +594,21 @@ proc replaceTypeVarsTAux(cl: var TReplTypeVars, t: PType): PType =
       of tyProc:
         eraseVoidParams(result)
         skipIntLiteralParams(result)
+
+      of tySequence:
+        if cl.isReturnType and cl.c.config.selectedGc == gcDestructors and result.destructor.isNil and
+            result[0].kind != tyEmpty:
+          let s = cl.c.graph.sysTypes[tySequence]
+          var old = copyType(s, s.owner, keepId=false)
+          # Remove the 'T' parameter from tySequence:
+          old.sons.setLen 0
+          old.n = nil
+          old.flags = {tfHasAsgn}
+          old.addSonSkipIntLit result[0]
+          result.destructor = old.destructor
+          result.assignment = old.assignment
+          result.sink = old.sink
+          cl.c.typesWithOps.add((result, old))
 
       else: discard
     else:
