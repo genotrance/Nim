@@ -19,7 +19,7 @@ const
   useEffectSystem* = true
   useWriteTracking* = false
   hasFFI* = defined(nimHasLibFFI)
-  copyrightYear* = "2018"
+  copyrightYear* = "2019"
 
 type                          # please make sure we have under 32 options
                               # (improves code efficiency a lot!)
@@ -82,6 +82,7 @@ type                          # please make sure we have under 32 options
     optNoNimblePath
     optHotCodeReloading
     optDynlibOverrideAll
+    optNimV2
 
   TGlobalOptions* = set[TGlobalOption]
 
@@ -194,7 +195,6 @@ type
     features*: set[Feature]
     arguments*: string ## the arguments to be passed to the program that
                        ## should be run
-    helpWritten*: bool
     ideCmd*: IdeCmd
     oldNewlines*: bool
     cCompiler*: TSystemCC
@@ -249,9 +249,9 @@ type
     suggestVersion*: int
     suggestMaxResults*: int
     lastLineInfo*: TLineInfo
-    writelnHook*: proc (output: string) {.closure.}
+    writelnHook*: proc (output: string) {.closure.} # cannot make this gcsafe yet because of Nimble
     structuredErrorHook*: proc (config: ConfigRef; info: TLineInfo; msg: string;
-                                severity: Severity) {.closure.}
+                                severity: Severity) {.closure, gcsafe.}
     cppCustomNamespace*: string
 
 proc hcrOn*(conf: ConfigRef): bool = return optHotCodeReloading in conf.globalOptions

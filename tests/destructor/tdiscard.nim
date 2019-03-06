@@ -1,3 +1,8 @@
+discard """
+joinable: false
+target: "C"
+"""
+
 type
   O = object
 

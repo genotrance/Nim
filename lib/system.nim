@@ -236,16 +236,15 @@ proc reset*[T](obj: var T) {.magic: "Reset", noSideEffect.}
   ## resets an object `obj` to its initial (binary zero) value. This needs to
   ## be called before any possible `object branch transition`:idx:.
 
-when defined(nimNewRuntime):
-  proc wasMoved*[T](obj: var T) {.magic: "WasMoved", noSideEffect.} =
-    ## resets an object `obj` to its initial (binary zero) value to signify
-    ## it was "moved" and to signify its destructor should do nothing and
-    ## ideally be optimized away.
-    discard
+proc wasMoved*[T](obj: var T) {.magic: "WasMoved", noSideEffect.} =
+  ## resets an object `obj` to its initial (binary zero) value to signify
+  ## it was "moved" and to signify its destructor should do nothing and
+  ## ideally be optimized away.
+  discard
 
-  proc move*[T](x: var T): T {.magic: "Move", noSideEffect.} =
-    result = x
-    wasMoved(x)
+proc move*[T](x: var T): T {.magic: "Move", noSideEffect.} =
+  result = x
+  wasMoved(x)
 
 type
   range*{.magic: "Range".}[T] ## Generic type to construct range types.
@@ -268,12 +267,8 @@ else:
     UncheckedArray*{.unchecked.}[T] = array[0,T]
     ## Array with no bounds checking
 
-when defined(nimHasOpt):
-  type opt*{.magic: "Opt".}[T]
-
-when defined(nimNewRuntime):
-  type sink*{.magic: "BuiltinType".}[T]
-  type lent*{.magic: "BuiltinType".}[T]
+type sink*{.magic: "BuiltinType".}[T]
+type lent*{.magic: "BuiltinType".}[T]
 
 proc high*[T: Ordinal](x: T): T {.magic: "High", noSideEffect.}
   ## returns the highest possible value of an ordinal value `x`. As a special
@@ -388,13 +383,12 @@ when defined(nimArrIdx):
   proc arrPut[I: Ordinal;T,S](a: T; i: I;
     x: S) {.noSideEffect, magic: "ArrPut".}
 
-  when defined(nimNewRuntime):
-    proc `=destroy`*[T](x: var T) {.inline, magic: "Destroy".} =
-      ## generic `destructor`:idx: implementation that can be overriden.
-      discard
-    proc `=sink`*[T](x: var T; y: T) {.inline, magic: "Asgn".} =
-      ## generic `sink`:idx: implementation that can be overriden.
-      shallowCopy(x, y)
+  proc `=destroy`*[T](x: var T) {.inline, magic: "Destroy".} =
+    ## generic `destructor`:idx: implementation that can be overriden.
+    discard
+  proc `=sink`*[T](x: var T; y: T) {.inline, magic: "Asgn".} =
+    ## generic `sink`:idx: implementation that can be overriden.
+    shallowCopy(x, y)
 
 type
   HSlice*[T, U] = object ## "heterogenous" slice type
@@ -675,11 +669,6 @@ type
     ## Raised on dereferences of ``nil`` pointers.
     ##
     ## This is only raised if the ``segfaults.nim`` module was imported!
-
-when defined(nimNewRuntime):
-  type
-    MoveError* = object of Defect ## \
-      ## Raised on attempts to re-sink an already consumed ``sink`` parameter.
 
 when defined(js) or defined(nimdoc):
   type
@@ -1352,22 +1341,42 @@ proc `is`*[T, S](x: T, y: S): bool {.magic: "Is", noSideEffect.}
 template `isnot`*(x, y: untyped): untyped = not (x is y)
   ## Negated version of `is`. Equivalent to ``not(x is y)``.
 
-proc new*[T](a: var ref T) {.magic: "New", noSideEffect.}
-  ## creates a new object of type ``T`` and returns a safe (traced)
-  ## reference to it in ``a``.
+when defined(nimV2) and not defined(nimscript):
+  type owned*{.magic: "BuiltinType".}[T]
 
-proc new*(t: typedesc): auto =
-  ## creates a new object of type ``T`` and returns a safe (traced)
-  ## reference to it as result value.
-  ##
-  ## When ``T`` is a ref type then the resulting type will be ``T``,
-  ## otherwise it will be ``ref T``.
-  when (t is ref):
-    var r: t
-  else:
-    var r: ref t
-  new(r)
-  return r
+  proc new*[T](a: var owned(ref T)) {.magic: "New", noSideEffect.}
+    ## creates a new object of type ``T`` and returns a safe (traced)
+    ## reference to it in ``a``.
+
+  proc new*(t: typedesc): auto =
+    ## creates a new object of type ``T`` and returns a safe (traced)
+    ## reference to it as result value.
+    ##
+    ## When ``T`` is a ref type then the resulting type will be ``T``,
+    ## otherwise it will be ``ref T``.
+    when (t is ref):
+      var r: owned t
+    else:
+      var r: owned(ref t)
+    new(r)
+    return r
+else:
+  proc new*[T](a: var ref T) {.magic: "New", noSideEffect.}
+    ## creates a new object of type ``T`` and returns a safe (traced)
+    ## reference to it in ``a``.
+
+  proc new*(t: typedesc): auto =
+    ## creates a new object of type ``T`` and returns a safe (traced)
+    ## reference to it as result value.
+    ##
+    ## When ``T`` is a ref type then the resulting type will be ``T``,
+    ## otherwise it will be ``ref T``.
+    when (t is ref):
+      var r: t
+    else:
+      var r: ref t
+    new(r)
+    return r
 
 proc `of`*[T, S](x: typeDesc[T], y: typeDesc[S]): bool {.magic: "Of", noSideEffect.}
 proc `of`*[T, S](x: T, y: typeDesc[S]): bool {.magic: "Of", noSideEffect.}
@@ -3013,8 +3022,10 @@ template newException*(exceptn: typedesc, message: string;
                        parentException: ref Exception = nil): untyped =
   ## creates an exception object of type ``exceptn`` and sets its ``msg`` field
   ## to `message`. Returns the new exception object.
-  var
-    e: ref exceptn
+  when declared(owned):
+    var e: owned(ref exceptn)
+  else:
+    var e: ref exceptn
   new(e)
   e.msg = message
   e.parent = parentException
@@ -3053,13 +3064,19 @@ when not declared(sysFatal):
       sysFatal(exceptn, message, "")
   else:
     proc sysFatal(exceptn: typedesc, message: string) {.inline, noReturn.} =
-      var e: ref exceptn
+      when declared(owned):
+        var e: owned(ref exceptn)
+      else:
+        var e: ref exceptn
       new(e)
       e.msg = message
       raise e
 
     proc sysFatal(exceptn: typedesc, message, arg: string) {.inline, noReturn.} =
-      var e: ref exceptn
+      when declared(owned):
+        var e: owned(ref exceptn)
+      else:
+        var e: ref exceptn
       new(e)
       e.msg = message & arg
       raise e
@@ -4261,11 +4278,16 @@ proc `$`*(t: typedesc): string {.magic: "TypeTrait".} =
     doAssert $(type("Foo")) == "string"
     static: doAssert $(type(@['A', 'B'])) == "seq[char]"
 
+when defined(nimHasDefault):
+  proc default*(T: typedesc): T {.magic: "Default", noSideEffect.}
+    ## returns the default value of the type ``T``.
+
 import system/widestrs
 export widestrs
 
-import system/io
-export io
+when not defined(nimnoio):
+  import system/io
+  export io
 
 when not defined(createNimHcr):
   include nimhcr

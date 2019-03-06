@@ -102,10 +102,8 @@ proc writeVersionInfo(conf: ConfigRef; pass: TCmdLinePass) =
                {msgStdout})
     msgQuit(0)
 
-proc writeCommandLineUsage*(conf: ConfigRef; helpWritten: var bool) =
-  if not helpWritten:
-    msgWriteln(conf, getCommandLineDesc(conf), {msgStdout})
-    helpWritten = true
+proc writeCommandLineUsage*(conf: ConfigRef) =
+  msgWriteln(conf, getCommandLineDesc(conf), {msgStdout})
 
 proc addPrefix(switch: string): string =
   if len(switch) == 1: result = "-" & switch
@@ -740,7 +738,8 @@ proc processSwitch*(switch, arg: string, pass: TCmdLinePass, info: TLineInfo;
     expectNoArg(conf, switch, arg, pass, info)
     doAssert(conf != nil)
     incl(conf.features, destructor)
-    defineSymbol(conf.symbols, "nimNewRuntime")
+    incl(conf.globalOptions, optNimV2)
+    defineSymbol(conf.symbols, "nimV2")
   of "stylecheck":
     case arg.normalize
     of "off": conf.globalOptions = conf.globalOptions - {optStyleHint, optStyleError}

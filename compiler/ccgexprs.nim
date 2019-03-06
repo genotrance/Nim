@@ -1153,6 +1153,9 @@ proc genReset(p: BProc, n: PNode) =
           addrLoc(p.config, a),
           genTypeInfo(p.module, skipTypes(a.t, {tyVar}), n.info))
 
+proc genDefault(p: BProc; n: PNode; d: var TLoc) =
+  resetLoc(p, d)
+
 proc rawGenNew(p: BProc, a: TLoc, sizeExpr: Rope) =
   var sizeExpr = sizeExpr
   let typ = a.t
@@ -1723,11 +1726,16 @@ proc genSetOp(p: BProc, e: PNode, d: var TLoc, op: TMagic) =
   const
     lookupOpr: array[mLeSet..mSymDiffSet, string] = [
       "for ($1 = 0; $1 < $2; $1++) { $n" &
-        "  $3 = (($4[$1] & ~ $5[$1]) == 0);$n" &
-        "  if (!$3) break;}$n", "for ($1 = 0; $1 < $2; $1++) { $n" &
-        "  $3 = (($4[$1] & ~ $5[$1]) == 0);$n" & "  if (!$3) break;}$n" &
-        "if ($3) $3 = (#nimCmpMem($4, $5, $2) != 0);$n",
-      "&", "|", "& ~", "^"]
+      "  $3 = (($4[$1] & ~ $5[$1]) == 0);$n" &
+      "  if (!$3) break;}$n",
+      "for ($1 = 0; $1 < $2; $1++) { $n" &
+      "  $3 = (($4[$1] & ~ $5[$1]) == 0);$n" &
+      "  if (!$3) break;}$n" &
+      "if ($3) $3 = (#nimCmpMem($4, $5, $2) != 0);$n",
+      "&",
+      "|",
+      "& ~",
+      "^"]
   var a, b, i: TLoc
   var setType = skipTypes(e.sons[1].typ, abstractVar)
   var size = int(getSize(p.config, setType))
@@ -2058,6 +2066,7 @@ proc genMagicExpr(p: BProc, e: PNode, d: var TLoc, op: TMagic) =
         addf(p.module.s[cfsDynLibInit], "\t$1 = ($2) hcrGetProc($3, \"$1\");$n",
              [mangleDynLibProc(prc), getTypeDesc(p.module, prc.loc.t), getModuleDllPath(p.module, prc)])
     genCall(p, e, d)
+  of mDefault: genDefault(p, e, d)
   of mReset: genReset(p, e)
   of mEcho: genEcho(p, e[1].skipConv)
   of mArrToSeq: genArrToSeq(p, e, d)
