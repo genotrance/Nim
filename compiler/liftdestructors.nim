@@ -141,24 +141,22 @@ proc considerAsgnOrSink(c: var TLiftCtx; t: PType; body, x, y: PNode;
     result = true
 
 proc addDestructorCall(c: var TLiftCtx; t: PType; body, x: PNode): bool =
-  let op = t.destructor
+  var op = t.destructor
+  if op == nil and useNoGc(c, t):
+    op = liftBody(c.graph, t, attachedDestructor, c.info)
+    doAssert op != nil
+    doAssert op == t.destructor
+
   if op != nil:
     markUsed(c.graph.config, c.info, op, c.graph.usageSym)
     onUse(c.info, op)
     body.add destructorCall(c.graph, op, x)
     result = true
   elif useNoGc(c, t):
-    if sameType(t, c.asgnForType) and c.kind == attachedDestructor:
-      let op = c.fn
-      markUsed(c.graph.config, c.info, op, c.graph.usageSym)
-      onUse(c.info, op)
-      body.add destructorCall(c.graph, op, x)
-      result = true
-    else:
-      internalError(c.graph.config, c.info,
-        "type-bound operator could not be resolved")
+    internalError(c.graph.config, c.info,
+      "type-bound operator could not be resolved")
 
-proc considerOverloadedOp(c: var TLiftCtx; t: PType; body, x, y: PNode): bool =
+proc considerUserDefinedOp(c: var TLiftCtx; t: PType; body, x, y: PNode): bool =
   case c.kind
   of attachedDestructor:
     result = addDestructorCall(c, t, body, x)
@@ -300,10 +298,10 @@ proc ownedRefOp(c: var TLiftCtx; t: PType; body, x, y: PNode) =
   #var disposeCall = genBuiltin(c.graph, mDispose, "dispose", x)
 
   if isFinal(elemType):
-    discard addDestructorCall(c, elemType, actions, x)
+    discard addDestructorCall(c, elemType, actions, genDeref(x))
     actions.add callCodegenProc(c.graph, "nimRawDispose", c.info, x)
   else:
-    discard addDestructorCall(c, elemType, newNodeI(nkStmtList, c.info), x)
+    discard addDestructorCall(c, elemType, newNodeI(nkStmtList, c.info), genDeref(x))
     actions.add callCodegenProc(c.graph, "nimDestroyAndDispose", c.info, x)
 
   case c.kind
@@ -372,7 +370,7 @@ proc liftBodyAux(c: var TLiftCtx; t: PType; body, x, y: PNode) =
     elif c.graph.config.selectedGC == gcDestructors:
       # note that tfHasAsgn is propagated so we need the check on
       # 'selectedGC' here to determine if we have the new runtime.
-      discard considerOverloadedOp(c, t, body, x, y)
+      discard considerUserDefinedOp(c, t, body, x, y)
     elif tfHasAsgn in t.flags:
       if c.kind != attachedDestructor:
         body.add newSeqCall(c.graph, x, y)
@@ -383,14 +381,14 @@ proc liftBodyAux(c: var TLiftCtx; t: PType; body, x, y: PNode) =
     if useNoGc(c, t):
       strOp(c, t, body, x, y)
     elif tfHasAsgn in t.flags:
-      discard considerOverloadedOp(c, t, body, x, y)
+      discard considerUserDefinedOp(c, t, body, x, y)
     else:
       defaultOp(c, t, body, x, y)
   of tyObject:
-    if not considerOverloadedOp(c, t, body, x, y):
+    if not considerUserDefinedOp(c, t, body, x, y):
       liftBodyObj(c, t.n, body, x, y)
   of tyDistinct:
-    if not considerOverloadedOp(c, t, body, x, y):
+    if not considerUserDefinedOp(c, t, body, x, y):
       liftBodyAux(c, t.sons[0].skipTypes(skipPtrs), body, x, y)
   of tyTuple:
     liftBodyTup(c, t, body, x, y)
@@ -479,18 +477,26 @@ proc liftBody(g: ModuleGraph; typ: PType; kind: TTypeAttachedOp;
   if kind != attachedDestructor:
     result.typ.addParam src
 
-  liftBodyAux(a, typ, body, newSymNode(dest).newDeref, newSymNode(src))
-  # recursion is handled explicitly, do not register the type based operation
-  # before 'liftBodyAux':
-  if g.config.selectedGC == gcDestructors and
-      typ.kind in {tySequence, tyString} and body.len == 0:
-    discard "do not cache it yet"
-  else:
+  if optNimV2 in g.config.globalOptions:
     case kind
     of attachedAsgn: typ.assignment = result
     of attachedSink: typ.sink = result
     of attachedDeepCopy: typ.deepCopy = result
     of attachedDestructor: typ.destructor = result
+
+  liftBodyAux(a, typ, body, newSymNode(dest).newDeref, newSymNode(src))
+  if optNimV2 notin g.config.globalOptions:
+    # recursion is handled explicitly, do not register the type based operation
+    # before 'liftBodyAux':
+    if g.config.selectedGC == gcDestructors and
+        typ.kind in {tySequence, tyString} and body.len == 0:
+      discard "do not cache it yet"
+    else:
+      case kind
+      of attachedAsgn: typ.assignment = result
+      of attachedSink: typ.sink = result
+      of attachedDeepCopy: typ.deepCopy = result
+      of attachedDestructor: typ.destructor = result
 
   var n = newNodeI(nkProcDef, info, bodyPos+1)
   for i in 0 ..< n.len: n.sons[i] = newNodeI(nkEmpty, info)
@@ -528,6 +534,3 @@ proc liftTypeBoundOps*(g: ModuleGraph; typ: PType; info: TLineInfo) =
     liftBody(g, typ, attachedAsgn, info)
   if typ.sink == nil:
     liftBody(g, typ, attachedSink, info)
-
-#proc patchResolvedTypeBoundOp*(g: ModuleGraph; n: PNode): PNode =
-#  if n.kind == nkCall and

@@ -697,10 +697,6 @@ proc p(n: PNode; c: var Con): PNode =
   of nkNone..nkNilLit, nkTypeSection, nkProcDef, nkConverterDef, nkMethodDef,
       nkIteratorDef, nkMacroDef, nkTemplateDef, nkLambda, nkDo, nkFuncDef:
     result = n
-  of nkDiscardStmt:
-    result = n
-    if n[0].typ != nil and hasDestructor(n[0].typ):
-      result = genDestroy(c, n[0].typ, n[0])
   of nkCast, nkHiddenStdConv, nkHiddenSubConv, nkConv:
     result = copyNode(n)
     # Destination type
@@ -735,8 +731,8 @@ proc injectDestructorCalls*(g: ModuleGraph; owner: PSym; n: PNode): PNode =
       if param.typ.kind == tySink and hasDestructor(param.typ.sons[0]):
         c.destroys.add genDestroy(c, param.typ.skipTypes({tyGenericInst, tyAlias, tySink}), params[i])
 
-  if optNimV2 in c.graph.config.globalOptions:
-    injectDefaultCalls(n, c)
+  #if optNimV2 in c.graph.config.globalOptions:
+  #  injectDefaultCalls(n, c)
   let body = p(n, c)
   result = newNodeI(nkStmtList, n.info)
   if c.topLevelVars.len > 0:
